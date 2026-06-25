@@ -274,16 +274,30 @@ def fetch_forecast(spot):
         ])
     }
 
-    marine_resp = requests.get(marine_url, params=marine_params, timeout=30)
-    weather_resp = requests.get(weather_url, params=weather_params, timeout=30)
+    last_error = None
 
-    marine_resp.raise_for_status()
-    weather_resp.raise_for_status()
+    for attempt in range(3):
+        try:
+            marine_resp = requests.get(marine_url, params=marine_params, timeout=45)
+            weather_resp = requests.get(weather_url, params=weather_params, timeout=45)
 
-    return {
-        "marine": marine_resp.json(),
-        "weather": weather_resp.json()
-    }
+            marine_resp.raise_for_status()
+            weather_resp.raise_for_status()
+
+            return {
+                "marine": marine_resp.json(),
+                "weather": weather_resp.json()
+            }
+
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            print(f"Fehler bei {spot['name']} (Versuch {attempt + 1}/3): {e}")
+
+            if attempt < 2:
+                import time
+                time.sleep(5)
+
+    raise last_error
 
 # ============================================================
 # ROWS BAUEN
