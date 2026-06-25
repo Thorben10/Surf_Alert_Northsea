@@ -698,7 +698,6 @@ def main():
         new_sent.append(sid)
 
     state["sent_alerts"] = new_sent[-300:]
-       state["sent_alerts"] = new_sent[-300:]
     save_state(state)
 
 if __name__ == "__main__":
