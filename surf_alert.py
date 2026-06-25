@@ -407,12 +407,54 @@ def summarize_session(spot_name, session):
     avg_score = round(sum(r["score"] for r in session) / len(session), 1)
     max_score = round(max(r["score"] for r in session), 1)
 
+    best_row = max(session, key=lambda r: r["score"])
+
     swell_heights = [r["swell_height_used"] for r in session if r["swell_height_used"] is not None]
     swell_periods = [r["swell_period_used"] for r in session if r["swell_period_used"] is not None]
     wind_speeds = [r["wind_speed"] for r in session if r["wind_speed"] is not None]
     wind_dirs = [r["wind_direction"] for r in session if r["wind_direction"] is not None]
     swell_dirs = [r["swell_direction_used"] for r in session if r["swell_direction_used"] is not None]
 
+    def fmt_range(values, decimals=1):
+        if not values:
+            return "n/a"
+        lo = round(min(values), decimals)
+        hi = round(max(values), decimals)
+        if lo == hi:
+            return f"{lo}"
+        return f"{lo}–{hi}"
+
+    swell_dir = round(best_row["swell_direction_used"]) if best_row["swell_direction_used"] is not None else None
+    wind_dir = round(best_row["wind_direction"]) if best_row["wind_direction"] is not None else None
+
+    return {
+        "spot": spot_name,
+        "start": start,
+        "end": end,
+        "avg_score": avg_score,
+        "max_score": max_score,
+        "hours": len(session),
+
+        "best_time": best_row["dt"],
+        "best_score": best_row["score"],
+
+        "swell_height_range": fmt_range(swell_heights),
+        "swell_period_range": fmt_range(swell_periods),
+        "wind_speed_range": fmt_range(wind_speeds),
+
+        "swell_dir": swell_dir,
+        "wind_dir": wind_dir,
+
+        "best_swell_height": best_row["swell_height_used"],
+        "best_swell_period": best_row["swell_period_used"],
+        "best_swell_dir": best_row["swell_direction_used"],
+        "best_wind_speed": best_row["wind_speed"],
+        "best_wind_dir": best_row["wind_direction"],
+
+        "swell_dir_compass": deg_to_compass(swell_dir) if swell_dir is not None else "n/a",
+        "wind_dir_compass": deg_to_compass(wind_dir) if wind_dir is not None else "n/a",
+    }
+    
     def fmt_range(values, decimals=1):
         if not values:
             return "n/a"
@@ -444,20 +486,157 @@ def session_id(summary):
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 # ============================================================
+# LESBARE AUSGABE / INTERPRETATION
+# ============================================================
+
+def deg_to_compass(deg):
+    if deg is None:
+        return "n/a"
+    dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+            "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+    idx = round((deg % 360) / 22.5) % 16
+    return dirs[idx]
+
+def classify_quality(avg_score):
+    if avg_score >= 88:
+        return "stark"
+    if avg_score >= 80:
+        return "sehr gut"
+    if avg_score >= 74:
+        return "gut"
+    if avg_score >= 68:
+        return "brauchbar"
+    return "mäßig"
+
+def classify_wind_for_spot(spot_name, wind_dir_deg):
+    if wind_dir_deg is None:
+        return "unbekannt"
+
+    d = wind_dir_deg % 360
+
+    # Klitmøller / Vorupør / Hanstholm:
+    # grob offshore bei E bis SE
+    if spot_name in ["Klitmøller", "Nørre Vorupør", "Hanstholm"]:
+        if 70 <= d <= 150:
+            return "offshore"
+        if 40 <= d < 70 or 150 < d <= 190:
+            return "cross-offshore"
+        if 250 <= d <= 330:
+            return "onshore"
+        return "cross"
+
+    # Norderney:
+    # grob gut bei S bis ESE / SE
+    if spot_name == "Norderney":
+        if 120 <= d <= 210:
+            return "offshore"
+        if 90 <= d < 120 or 210 < d <= 240:
+            return "cross-offshore"
+        if d >= 300 or d <= 30:
+            return "onshore"
+        return "cross"
+
+    # Scheveningen:
+    if spot_name == "Scheveningen":
+        if 120 <= d <= 220:
+            return "offshore"
+        if 90 <= d < 120 or 220 < d <= 250:
+            return "cross-offshore"
+        if d >= 300 or d <= 30:
+            return "onshore"
+        return "cross"
+
+    # Domburg:
+    if spot_name == "Domburg":
+        if 130 <= d <= 210:
+            return "offshore"
+        if 100 <= d < 130 or 210 < d <= 240:
+            return "cross-offshore"
+        if d >= 320 or d <= 40:
+            return "onshore"
+        return "cross"
+
+    return "unbekannt"
+
+def build_comment(summary):
+    spot = summary["spot"]
+    swell_period = summary.get("best_swell_period")
+    wind_class = summary.get("wind_class")
+    swell_dir = summary.get("best_swell_dir_compass")
+
+    parts = []
+
+    if swell_period is not None:
+        if swell_period >= 12:
+            parts.append("lange, energiereiche Dünung")
+        elif swell_period >= 9:
+            parts.append("ordentliche Dünung")
+        else:
+            parts.append("eher kurzperiodische Dünung")
+
+    if swell_dir:
+        parts.append(f"Swell aus {swell_dir}")
+
+    if wind_class == "offshore":
+        parts.append("mit Offshore-Wind")
+    elif wind_class == "cross-offshore":
+        parts.append("mit leicht brauchbarem Cross-Offshore")
+    elif wind_class == "cross":
+        parts.append("mit eher seitlichem Wind")
+    elif wind_class == "onshore":
+        parts.append("aber onshore-anfällig")
+
+    if spot in ["Klitmøller", "Nørre Vorupør", "Hanstholm"] and swell_period is not None and swell_period >= 11:
+        return "Cold-Hawaii-Setup mit interessanter Periode. " + ", ".join(parts) + "."
+    if spot == "Norderney":
+        return "Nordsee-Fenster für Norderney. " + ", ".join(parts) + "."
+    if spot in ["Scheveningen", "Domburg"]:
+        return "Nordsee-/NL-Fenster. " + ", ".join(parts) + "."
+
+    return ", ".join(parts) + "."
+
+# ============================================================
 # ALERT TEXT
 # ============================================================
 
 def build_message(summary):
     start_str = summary["start"].strftime("%a %d.%m %H:%M")
     end_str = summary["end"].strftime("%a %d.%m %H:%M")
+    best_time_str = summary["best_time"].strftime("%a %H:%M")
+
+    quality = classify_quality(summary["avg_score"])
+    wind_class = classify_wind_for_spot(summary["spot"], summary["wind_dir"])
+
+    summary["wind_class"] = wind_class
+    summary["best_swell_dir_compass"] = summary.get("swell_dir_compass")
+
+    comment = build_comment(summary)
+
+    swell_dir_text = (
+        f"{summary['swell_dir_compass']} ({summary['swell_dir']}°)"
+        if summary["swell_dir"] is not None else "n/a"
+    )
+    wind_dir_text = (
+        f"{summary['wind_dir_compass']} ({summary['wind_dir']}°)"
+        if summary["wind_dir"] is not None else "n/a"
+    )
 
     return (
         f"🏄 Surf Alert — {summary['spot']}\n"
-        f"Fenster: {start_str} bis {end_str}\n"
-        f"Dauer: {summary['hours']} h\n"
-        f"Ø Score: {summary['avg_score']} | Peak: {summary['max_score']}\n"
-        f"Swell: {summary['swell_height_range']} m @ {summary['swell_period_range']} s aus {summary['swell_dir']}°\n"
-        f"Wind: {summary['wind_speed_range']} m/s aus {summary['wind_dir']}°"
+        f"Qualität: {quality}\n"
+        f"Fenster: {start_str} bis {end_str} ({summary['hours']} h)\n"
+        f"Beste Stunde: {best_time_str}\n"
+        f"Ø Score: {summary['avg_score']} | Peak: {summary['max_score']}\n\n"
+        f"Swell:\n"
+        f"• {summary['swell_height_range']} m\n"
+        f"• {summary['swell_period_range']} s\n"
+        f"• {swell_dir_text}\n\n"
+        f"Wind:\n"
+        f"• {summary['wind_speed_range']} m/s\n"
+        f"• {wind_dir_text}\n"
+        f"• {wind_class}\n\n"
+        f"Einschätzung:\n"
+        f"{comment}"
     )
 
 # ============================================================
