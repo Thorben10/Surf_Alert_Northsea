@@ -986,6 +986,15 @@ def build_message(summary):
 # HAUPTPROGRAMM
 # ============================================================
 
+def session_id(summary):
+    return (
+        f"{summary['spot']}|"
+        f"{summary['start'].isoformat()}|"
+        f"{summary['end'].isoformat()}|"
+        f"{summary['max_score']}"
+    )
+
+
 def main():
     print("DEBUG: main() wurde gestartet")
 
