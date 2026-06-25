@@ -704,6 +704,9 @@ def summarize_session(spot_name, session):
     wind_dirs = [r["wind_direction"] for r in session if r["wind_direction"] is not None]
     swell_dirs = [r["swell_direction_used"] for r in session if r["swell_direction_used"] is not None]
 
+    tide_scores = [r.get("component_tide") for r in session if r.get("component_tide") is not None]
+    windswell_penalties = [r.get("windswell_penalty", 0.0) for r in session]
+
     def fmt_range(values, decimals=1):
         if not values:
             return "n/a"
@@ -715,6 +718,9 @@ def summarize_session(spot_name, session):
 
     swell_dir = round(best_row["swell_direction_used"]) if best_row["swell_direction_used"] is not None else None
     wind_dir = round(best_row["wind_direction"]) if best_row["wind_direction"] is not None else None
+
+    avg_tide_score = round(sum(tide_scores) / len(tide_scores), 1) if tide_scores else None
+    avg_windswell_penalty = round(sum(windswell_penalties) / len(windswell_penalties), 1) if windswell_penalties else 0.0
 
     return {
         "spot": spot_name,
@@ -742,37 +748,10 @@ def summarize_session(spot_name, session):
 
         "swell_dir_compass": deg_to_compass(swell_dir) if swell_dir is not None else "n/a",
         "wind_dir_compass": deg_to_compass(wind_dir) if wind_dir is not None else "n/a",
+
+        "avg_tide_score": avg_tide_score,
+        "avg_windswell_penalty": avg_windswell_penalty,
     }
-    
-    def fmt_range(values, decimals=1):
-        if not values:
-            return "n/a"
-        lo = round(min(values), decimals)
-        hi = round(max(values), decimals)
-        if lo == hi:
-            return f"{lo}"
-        return f"{lo}–{hi}"
-
-    swell_dir = round(swell_dirs[0]) if swell_dirs else "n/a"
-    wind_dir = round(wind_dirs[0]) if wind_dirs else "n/a"
-
-    return {
-        "spot": spot_name,
-        "start": start,
-        "end": end,
-        "avg_score": avg_score,
-        "max_score": max_score,
-        "hours": len(session),
-        "swell_height_range": fmt_range(swell_heights),
-        "swell_period_range": fmt_range(swell_periods),
-        "wind_speed_range": fmt_range(wind_speeds),
-        "swell_dir": swell_dir,
-        "wind_dir": wind_dir,
-    }
-
-def session_id(summary):
-    raw = f"{summary['spot']}|{summary['start'].isoformat()}|{summary['end'].isoformat()}|{summary['avg_score']}"
-    return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 # ============================================================
 # LESBARE AUSGABE / INTERPRETATION
@@ -787,6 +766,58 @@ def deg_to_compass(deg):
     return dirs[idx]
 
 def classify_quality(avg_score):
+    def classify_confidence(avg_score, best_period, windswell_penalty):
+    score = 0
+
+    if avg_score >= 82:
+        score += 2
+    elif avg_score >= 74:
+        score += 1
+
+    if best_period is not None:
+        if best_period >= 11.5:
+            score += 2
+        elif best_period >= 9.5:
+            score += 1
+
+    if windswell_penalty <= 2:
+        score += 2
+    elif windswell_penalty <= 7:
+        score += 1
+
+    if score >= 5:
+        return "hoch"
+    if score >= 3:
+        return "mittel"
+    return "niedrig"
+
+
+def classify_groundswell(best_period):
+    if best_period is None:
+        return "unbekannt"
+    if best_period >= 12:
+        return "hoch"
+    if best_period >= 9.5:
+        return "mittel"
+    return "niedrig"
+
+
+def classify_windswell_risk(avg_penalty):
+    if avg_penalty >= 10:
+        return "hoch"
+    if avg_penalty >= 4:
+        return "mittel"
+    return "niedrig"
+
+
+def classify_tide_fit(avg_tide_score, use_tide):
+    if not use_tide:
+        return "irrelevant"
+    if avg_tide_score >= 80:
+        return "gut"
+    if avg_tide_score >= 55:
+        return "okay"
+    return "schwach"
     if avg_score >= 88:
         return "stark"
     if avg_score >= 80:
@@ -896,6 +927,17 @@ def build_message(summary):
     quality = classify_quality(summary["avg_score"])
     wind_class = classify_wind_for_spot(summary["spot"], summary["wind_dir"])
 
+    groundswell_factor = classify_groundswell(summary.get("best_swell_period"))
+    windswell_risk = classify_windswell_risk(summary.get("avg_windswell_penalty", 0.0))
+    confidence = classify_confidence(
+        summary["avg_score"],
+        summary.get("best_swell_period"),
+        summary.get("avg_windswell_penalty", 0.0),
+    )
+
+    use_tide = summary["spot"] in ["Norderney", "Scheveningen", "Domburg"]
+    tide_fit = classify_tide_fit(summary.get("avg_tide_score"), use_tide)
+
     summary["wind_class"] = wind_class
     summary["best_swell_dir_compass"] = summary.get("swell_dir_compass")
 
@@ -910,24 +952,34 @@ def build_message(summary):
         if summary["wind_dir"] is not None else "n/a"
     )
 
+    tide_block = ""
+    if use_tide:
+        tide_block = (
+            f"\nTide:\n"
+            f"• Tide-Fit: {tide_fit}\n"
+        )
+
     return (
         f"🏄 Surf Alert — {summary['spot']}\n"
         f"Qualität: {quality}\n"
+        f"Confidence: {confidence}\n"
         f"Fenster: {start_str} bis {end_str} ({summary['hours']} h)\n"
         f"Beste Stunde: {best_time_str}\n"
         f"Ø Score: {summary['avg_score']} | Peak: {summary['max_score']}\n\n"
         f"Swell:\n"
         f"• {summary['swell_height_range']} m\n"
         f"• {summary['swell_period_range']} s\n"
-        f"• {swell_dir_text}\n\n"
+        f"• {swell_dir_text}\n"
+        f"• Groundswell-Faktor: {groundswell_factor}\n\n"
         f"Wind:\n"
         f"• {summary['wind_speed_range']} m/s\n"
         f"• {wind_dir_text}\n"
-        f"• {wind_class}\n\n"
+        f"• {wind_class}\n"
+        f"• Windswell-Risiko: {windswell_risk}\n"
+        f"{tide_block}\n"
         f"Einschätzung:\n"
         f"{comment}"
     )
-
 # ============================================================
 # HAUPTPROGRAMM
 # ============================================================
