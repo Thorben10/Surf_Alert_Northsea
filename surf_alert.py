@@ -274,6 +274,137 @@ def tide_score(norm_level, pref):
     return max(0.0, 100.0 - (diff / 0.5) * 100.0)
 
 # ============================================================
+# NEUE SPOT-SPEZIFISCHE SCORE-HILFSFUNKTIONEN
+# ============================================================
+
+def score_direction_window(direction, center, tolerance):
+    """
+    100 Punkte im Kernfenster, danach weicher Abfall.
+    tolerance = halbe Breite des idealen Fensters
+    """
+    if direction is None:
+        return 0.0
+
+    diff = deg_diff(direction, center)
+
+    if diff <= tolerance:
+        return 100.0
+
+    # außerhalb des Fensters weicher Abfall über weitere 70°
+    extra = diff - tolerance
+    return max(0.0, 100.0 - (extra / 70.0) * 100.0)
+
+
+def score_profile_direction(direction, primary=None, secondary=None):
+    """
+    Kombiniert Primary- und Secondary-Richtungsfenster.
+    """
+    scores = []
+
+    if primary:
+        s = score_direction_window(direction, primary["center"], primary["tol"])
+        scores.append(s * primary.get("weight", 1.0))
+
+    if secondary:
+        s = score_direction_window(direction, secondary["center"], secondary["tol"])
+        scores.append(s * secondary.get("weight", 1.0))
+
+    if not scores:
+        return 0.0
+
+    # auf 0..100 normalisieren
+    total_weight = 0.0
+    if primary:
+        total_weight += primary.get("weight", 1.0)
+    if secondary:
+        total_weight += secondary.get("weight", 1.0)
+
+    return sum(scores) / total_weight if total_weight > 0 else 0.0
+
+
+def score_period_profile(value, profile):
+    """
+    Beispiel:
+    ok=8.5, good=10, excellent=12
+    """
+    if value is None or not profile:
+        return 0.0
+
+    ok_v = profile["ok"]
+    good_v = profile["good"]
+    excellent_v = profile["excellent"]
+
+    if value < ok_v:
+        # unterhalb von ok -> schnell abwerten
+        if value <= ok_v - 2.0:
+            return 0.0
+        return max(0.0, ((value - (ok_v - 2.0)) / 2.0) * 45.0)
+
+    if ok_v <= value < good_v:
+        # 45 bis 75
+        return 45.0 + ((value - ok_v) / (good_v - ok_v)) * 30.0
+
+    if good_v <= value < excellent_v:
+        # 75 bis 100
+        return 75.0 + ((value - good_v) / (excellent_v - good_v)) * 25.0
+
+    return 100.0
+
+
+def score_height_profile(value, profile):
+    """
+    Beispiel:
+    ok=0.9, good=1.2, excellent=1.8
+    """
+    if value is None or not profile:
+        return 0.0
+
+    ok_v = profile["ok"]
+    good_v = profile["good"]
+    excellent_v = profile["excellent"]
+
+    if value < ok_v:
+        if value <= ok_v * 0.55:
+            return 0.0
+        return max(0.0, ((value - ok_v * 0.55) / (ok_v - ok_v * 0.55)) * 45.0)
+
+    if ok_v <= value < good_v:
+        return 45.0 + ((value - ok_v) / (good_v - ok_v)) * 30.0
+
+    if good_v <= value < excellent_v:
+        return 75.0 + ((value - good_v) / (excellent_v - good_v)) * 25.0
+
+    return 100.0
+
+
+def compute_windswell_penalty(row, spot):
+    cfg = spot.get("windswell_penalty", {})
+    if not cfg.get("enabled"):
+        return 0.0
+
+    swell_period = row.get("swell_period_used")
+    wind_wave_height = row.get("wind_wave_height")
+    swell_height = row.get("swell_height_used")
+
+    if swell_period is None:
+        return 0.0
+
+    penalty = 0.0
+
+    # kurze Periode
+    if swell_period < cfg.get("short_period_below", 8.0):
+        penalty += cfg.get("penalty", 10)
+
+    # wenn Windwave die Swellhöhe dominiert, zusätzlich abwerten
+    if (
+        wind_wave_height is not None
+        and swell_height is not None
+        and wind_wave_height > swell_height * 0.9
+    ):
+        penalty += 5.0
+
+    return penalty
+# ============================================================
 # STATE
 # ============================================================
 
@@ -428,32 +559,103 @@ def score_row(spot, row):
     )
     swell_direction = row["swell_direction"] if row["swell_direction"] is not None else row["wave_direction"]
 
-    s_height = score_min_threshold(swell_height, spot["min_swell_height"], spot["min_swell_height"] * 1.8)
-    s_period = score_min_threshold(swell_period, spot["min_swell_period"], spot["min_swell_period"] + 4.0)
-    s_swell_dir = score_direction(swell_direction, spot["swell_dir_min"], spot["swell_dir_max"])
-    s_wind_dir = score_direction(row["wind_direction"], spot["wind_dir_min"], spot["wind_dir_max"])
-    s_wind_speed = score_max_threshold(row["wind_speed"], spot["max_wind_speed"], spot["max_wind_speed"] * 2.0)
-    s_wind_gust = score_max_threshold(row["wind_gust"], spot["max_wind_gust"], spot["max_wind_gust"] * 1.8)
-
-    total = (
-        s_height * 0.20 +
-        s_period * 0.28 +
-        s_swell_dir * 0.18 +
-        s_wind_dir * 0.16 +
-        s_wind_speed * 0.10 +
-        s_wind_gust * 0.08
-    )
-
-    if spot["use_tide"]:
-        s_tide = tide_score(row["sea_level_norm"], spot["tide_pref"])
-        total = total * 0.9 + s_tide * 0.1
-
-    return {
+    # damit compute_windswell_penalty() auf dieselben Werte zugreifen kann
+    row = {
         **row,
-        "score": round(total, 1),
         "swell_height_used": swell_height,
         "swell_period_used": swell_period,
         "swell_direction_used": swell_direction
+    }
+
+    # ------------------------------------------------------------
+    # 1) neue spot-spezifische Komponenten
+    # ------------------------------------------------------------
+    swell_dir_score = score_profile_direction(
+        swell_direction,
+        spot.get("swell_primary"),
+        spot.get("swell_secondary")
+    )
+
+    wind_dir_score = score_profile_direction(
+        row["wind_direction"],
+        spot.get("wind_offshore"),
+        spot.get("wind_cross")
+    )
+
+    period_score = score_period_profile(swell_period, spot.get("period_profile"))
+    height_score = score_height_profile(swell_height, spot.get("height_profile"))
+
+    wind_speed_score = score_max_threshold(
+        row["wind_speed"],
+        spot["max_wind_speed"],
+        spot["max_wind_speed"] * 2.0
+    )
+
+    wind_gust_score = score_max_threshold(
+        row["wind_gust"],
+        spot["max_wind_gust"],
+        spot["max_wind_gust"] * 1.8
+    )
+
+    tide_component = 100.0
+    if spot.get("use_tide"):
+        tide_component = tide_score(row["sea_level_norm"], spot.get("tide_pref", "any"))
+
+    windswell_penalty = compute_windswell_penalty(row, spot)
+
+    # ------------------------------------------------------------
+    # 2) Gewichte aus Spot-Profilen ziehen
+    # ------------------------------------------------------------
+    swell_dir_weight = spot.get("swell_primary", {}).get("weight", 0.22) + spot.get("swell_secondary", {}).get("weight", 0.10)
+    wind_dir_weight = spot.get("wind_offshore", {}).get("weight", 0.18) + spot.get("wind_cross", {}).get("weight", 0.08)
+    period_weight = spot.get("period_profile", {}).get("weight", 0.22)
+    height_weight = spot.get("height_profile", {}).get("weight", 0.10)
+    tide_weight = spot.get("tide_weight", 0.0)
+
+    # Restgewichte konservativ
+    wind_speed_weight = 0.08
+    wind_gust_weight = 0.05
+
+    total_weight = (
+        swell_dir_weight
+        + wind_dir_weight
+        + period_weight
+        + height_weight
+        + tide_weight
+        + wind_speed_weight
+        + wind_gust_weight
+    )
+
+    # falls tide_weight 0 ist, bleibt es trotzdem sauber normiert
+    raw_score = (
+        swell_dir_score * swell_dir_weight
+        + wind_dir_score * wind_dir_weight
+        + period_score * period_weight
+        + height_score * height_weight
+        + wind_speed_score * wind_speed_weight
+        + wind_gust_score * wind_gust_weight
+        + tide_component * tide_weight
+    ) / total_weight
+
+    final_score = max(0.0, raw_score - windswell_penalty)
+
+    return {
+        **row,
+        "score": round(final_score, 1),
+
+        "swell_height_used": swell_height,
+        "swell_period_used": swell_period,
+        "swell_direction_used": swell_direction,
+
+        # Debug / spätere Nachricht
+        "component_swell_dir": round(swell_dir_score, 1),
+        "component_wind_dir": round(wind_dir_score, 1),
+        "component_period": round(period_score, 1),
+        "component_height": round(height_score, 1),
+        "component_wind_speed": round(wind_speed_score, 1),
+        "component_wind_gust": round(wind_gust_score, 1),
+        "component_tide": round(tide_component, 1),
+        "windswell_penalty": round(windswell_penalty, 1),
     }
 
 # ============================================================
