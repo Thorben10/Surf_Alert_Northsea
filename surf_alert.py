@@ -663,28 +663,28 @@ def main():
     new_sent = list(already_sent)
 
     all_new_alerts = []
-    
-for spot in SPOTS:
-    print(f"Prüfe {spot['name']} ...")
 
-    try:
-        raw = fetch_forecast(spot)
-        rows = build_rows(raw)
-        scored = [score_row(spot, r) for r in rows]
-        sessions = group_sessions(scored)
+    for spot in SPOTS:
+        print(f"Prüfe {spot['name']} ...")
 
-        for sess in sessions:
-            summary = summarize_session(spot["name"], sess)
-            sid = session_id(summary)
+        try:
+            raw = fetch_forecast(spot)
+            rows = build_rows(raw)
+            scored = [score_row(spot, r) for r in rows]
+            sessions = group_sessions(scored)
 
-            if sid not in already_sent:
-                msg = build_message(summary)
-                all_new_alerts.append((sid, msg))
+            for sess in sessions:
+                summary = summarize_session(spot["name"], sess)
+                sid = session_id(summary)
 
-    except Exception as e:
-        print(f"Spot {spot['name']} konnte nicht verarbeitet werden: {e}")
-        continue
-   
+                if sid not in already_sent:
+                    msg = build_message(summary)
+                    all_new_alerts.append((sid, msg))
+
+        except Exception as e:
+            print(f"Spot {spot['name']} konnte nicht verarbeitet werden: {e}")
+            continue
+
     if not all_new_alerts:
         print("Keine neuen Surf-Alerts.")
         return
@@ -698,5 +698,5 @@ for spot in SPOTS:
     state["sent_alerts"] = new_sent[-300:]
     save_state(state)
 
-if __name__ == "__main__":
+    if __name__ == "__main__":
     main()
