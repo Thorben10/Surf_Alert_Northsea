@@ -766,7 +766,16 @@ def deg_to_compass(deg):
     return dirs[idx]
 
 def classify_quality(avg_score):
-    def classify_confidence(avg_score, best_period, windswell_penalty):
+    if avg_score >= 85:
+        return "sehr gut"
+    if avg_score >= 75:
+        return "gut"
+    if avg_score >= 65:
+        return "okay"
+    return "grenzwertig"
+
+
+def classify_confidence(avg_score, best_period, windswell_penalty):
     score = 0
 
     if avg_score >= 82:
@@ -813,20 +822,13 @@ def classify_windswell_risk(avg_penalty):
 def classify_tide_fit(avg_tide_score, use_tide):
     if not use_tide:
         return "irrelevant"
+    if avg_tide_score is None:
+        return "unbekannt"
     if avg_tide_score >= 80:
         return "gut"
     if avg_tide_score >= 55:
         return "okay"
     return "schwach"
-    if avg_score >= 88:
-        return "stark"
-    if avg_score >= 80:
-        return "sehr gut"
-    if avg_score >= 74:
-        return "gut"
-    if avg_score >= 68:
-        return "brauchbar"
-    return "mäßig"
 
 def classify_wind_for_spot(spot_name, wind_dir_deg):
     if wind_dir_deg is None:
