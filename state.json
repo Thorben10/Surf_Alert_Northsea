@@ -1,16 +1,3 @@
 {
-  "sent_alerts": [
-    "7d1f64214550f53440c61302f3288372",
-    "262010aa66998c8cf186969055aabfd6",
-    "a2ba290cddf762d04dd1268802ec72e5",
-    "07e01663ab6e06ad08cc987e6896e287",
-    "3b11c06b9531daebc019ea0cf845d0d0",
-    "e1cea3a5d1522ccb4fb60ee46a165db3",
-    "3484df7a3cc563e42966a2a54f1795c0",
-    "ff2c44e7830dca50004d69e85fbb980a",
-    "18b81a689434b06d0ead7f618962230d",
-    "bec0317ee835ffdc09a87bb1aab677ed",
-    "e6c0f9b0e5c2b79cfa757ccc30a12a9c",
-    "bfbf7e414ca583d5d6db60ee0ce8593f"
-  ]
+  "sent_alerts": []
 }
