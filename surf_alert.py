@@ -658,6 +658,8 @@ def build_message(summary):
 # ============================================================
 
 def main():
+    print("DEBUG: main() wurde gestartet")
+
     state = load_state()
     already_sent = set(state.get("sent_alerts", []))
     new_sent = list(already_sent)
@@ -696,7 +698,8 @@ def main():
         new_sent.append(sid)
 
     state["sent_alerts"] = new_sent[-300:]
+       state["sent_alerts"] = new_sent[-300:]
     save_state(state)
 
-    if __name__ == "__main__":
-        main()
+if __name__ == "__main__":
+    main()
