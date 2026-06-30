@@ -1,6 +1,8 @@
 import os
 import json
 import hashlib
+import csv
+from pathlib import Path
 from datetime import datetime, timedelta
 
 import requests
@@ -17,6 +19,7 @@ ALERT_THRESHOLD = 60
 SESSION_MIN_HOURS = 3
 STATE_FILE = "state.json"
 TIMEZONE = "Europe/Berlin"
+HISTORY_FILE = Path("history.csv")
 
 SPOTS = [
     {
@@ -407,7 +410,30 @@ def compute_windswell_penalty(row, spot):
 # ============================================================
 # STATE
 # ============================================================
+def ensure_history_file():
+    if HISTORY_FILE.exists():
+        return
 
+    with open(HISTORY_FILE, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+
+        writer.writerow([
+            "timestamp",
+            "spot",
+            "score",
+            "peak_period",
+            "mean_period",
+            "wave_period",
+            "swell_height",
+            "wave_height",
+            "windwave_height",
+            "wind_speed",
+            "wind_direction",
+            "gust",
+            "confidence",
+            "alert_sent"
+        ])
+        
 def load_state():
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -997,7 +1023,9 @@ def session_id(summary):
 
 def main():
     print("DEBUG: main() wurde gestartet")
-
+    
+    ensure_history_file()
+    
     state = load_state()
     already_sent = set(state.get("sent_alerts", []))
     new_sent = list(already_sent)
