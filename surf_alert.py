@@ -1012,7 +1012,43 @@ def build_message(summary):
 # HAUPTPROGRAMM
 # ============================================================
 
-def session_id(summary):
+def passes_hard_rules(spot, session, summary):
+    rules = spot.get("hard_rules")
+
+    if not rules:
+        return True
+
+    # Mindest-Peakperiode
+    if summary["best_period"] < rules["min_peak_period"]:
+        print(f"❌ {spot['name']}: Peakperiode {summary['best_period']:.1f}s < {rules['min_peak_period']}s")
+        return False
+
+    # Mindestdauer
+    if summary["hours"] < rules["min_session_hours"]:
+        print(f"❌ {spot['name']}: Session nur {summary['hours']}h")
+        return False
+
+    # Mindest-Swellhöhe
+    swell_heights = [
+        r["swell_height_used"]
+        for r in session
+        if r["swell_height_used"] is not None
+    ]
+
+    if swell_heights and max(swell_heights) < rules["min_wave_height"]:
+        print(f"❌ {spot['name']}: Swellhöhe zu klein")
+        return False
+
+    # Windswell
+    if (
+        rules["require_groundswell"]
+        and summary["avg_windswell_penalty"] >= 8
+    ):
+        print(f"❌ {spot['name']}: Zu viel Windswell")
+        return False
+
+    return True
+    def session_id(summary):
     return (
         f"{summary['spot']}|"
         f"{summary['start'].isoformat()}|"
@@ -1043,7 +1079,11 @@ def main():
 
             for sess in sessions:
                 summary = summarize_session(spot["name"], sess)
-                sid = session_id(summary)
+
+                if not passes_hard_rules(spot, sess, summary):
+                    continue
+
+                sid = session_id(summary))
 
                 if sid not in already_sent:
                     msg = build_message(summary)
