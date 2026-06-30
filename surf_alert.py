@@ -1083,7 +1083,7 @@ def main():
                 if not passes_hard_rules(spot, sess, summary):
                     continue
 
-                sid = session_id(summary))
+                sid = session_id(summary)
 
                 if sid not in already_sent:
                     msg = build_message(summary)
