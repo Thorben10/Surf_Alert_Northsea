@@ -1018,17 +1018,14 @@ def passes_hard_rules(spot, session, summary):
     if not rules:
         return True
 
-    # Mindest-Peakperiode
-    if summary["best_period"] < rules["min_peak_period"]:
-        print(f"❌ {spot['name']}: Peakperiode {summary['best_period']:.1f}s < {rules['min_peak_period']}s")
+    if summary["best_swell_period"] < rules["min_peak_period"]:
+        print(f"❌ {spot['name']}: Peakperiode zu kurz")
         return False
 
-    # Mindestdauer
     if summary["hours"] < rules["min_session_hours"]:
-        print(f"❌ {spot['name']}: Session nur {summary['hours']}h")
+        print(f"❌ {spot['name']}: Session zu kurz")
         return False
 
-    # Mindest-Swellhöhe
     swell_heights = [
         r["swell_height_used"]
         for r in session
@@ -1036,10 +1033,9 @@ def passes_hard_rules(spot, session, summary):
     ]
 
     if swell_heights and max(swell_heights) < rules["min_wave_height"]:
-        print(f"❌ {spot['name']}: Swellhöhe zu klein")
+        print(f"❌ {spot['name']}: Swell zu klein")
         return False
 
-    # Windswell
     if (
         rules["require_groundswell"]
         and summary["avg_windswell_penalty"] >= 8
@@ -1048,14 +1044,15 @@ def passes_hard_rules(spot, session, summary):
         return False
 
     return True
-    def session_id(summary):
+
+
+def session_id(summary):
     return (
         f"{summary['spot']}|"
         f"{summary['start'].isoformat()}|"
         f"{summary['end'].isoformat()}|"
         f"{summary['max_score']}"
     )
-
 
 def main():
     print("DEBUG: main() wurde gestartet")
